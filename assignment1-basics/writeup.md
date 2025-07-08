@@ -13,3 +13,9 @@ Knowledge
 (a) The length of bytes encoded by utf-16/32 is longer than utf-8.
 (b) utf-8 is a variable-lengeht encoding. bytes([x]) is different bytes(x), bytes(int) returns 0 bytes with length x.
 (c) b'\xff\xff'; a two bytes seqence must begin with b'110xxxxx 10xxxxxx'
+
+## Q: BPE Training on TinyStories.
+(a) ~970s, ~460000KB; longest byte: [b' surpris', b' happily', b' quickly', b' magical', b' backyar']
+(b) most cost part: pre_tokenize.
+
+

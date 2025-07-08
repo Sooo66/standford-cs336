@@ -1,8 +1,34 @@
-from .pretokenization_example import find_chunk_boundaries
+from pretokenization_example import find_chunk_boundaries
 from multiprocessing import Pool, cpu_count
 import regex as re
 from collections import Counter, defaultdict
 from loguru import logger
+
+
+import time
+import tracemalloc
+from functools import wraps
+
+def measure(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        tracemalloc.start()
+        start_time = time.perf_counter()
+        
+        result = func(*args, **kwargs)
+        
+        end_time = time.perf_counter()
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        
+        logger.debug(f"✅ 函数: {func.__name__}")
+        logger.debug(f"⏱️ 运行时间: {end_time - start_time:.6f} 秒")
+        logger.debug(f"📈 当前内存占用: {current / 1024:.2f} KB")
+        logger.debug(f"🚀 内存峰值: {peak / 1024:.2f} KB")
+        logger.debug("--------------------------------------\n")
+        
+        return result
+    return wrapper
 
 
 class Chunker:
@@ -18,7 +44,7 @@ class Chunker:
             )
         return boundaries
 
-
+@measure
 def pre_tokenize(
     input_path: str, special_tokens: list[str], start: int, end: int, pat: str
 ) -> Counter:
@@ -74,7 +100,7 @@ class Word:
         self.tokens = new_tokens
         self._update_pairs()
 
-
+@measure
 class BPETrainer:
     def __init__(self, vocab_size: int, special_tokens: list[str]):
         self.vocab_size = vocab_size
@@ -137,6 +163,11 @@ class BPETrainer:
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
+@measure
+def pool_pretokenize(num_proc, chunk_args):
+    with Pool(num_proc) as pool:
+        results = pool.starmap(pre_tokenize, chunk_args)
+        return results
 
 def train_bpe_main(input_path: str, vocab_size: int, special_tokens: list[str]):
     num_proc = cpu_count() - 2
@@ -148,8 +179,10 @@ def train_bpe_main(input_path: str, vocab_size: int, special_tokens: list[str]):
         for start, end in zip(boundaries[:-1], boundaries[1:])
     ]
 
-    with Pool(num_proc) as pool:
-        results = pool.starmap(pre_tokenize, chunk_args)
+    # with Pool(num_proc) as pool:
+    #     results = pool.starmap(pre_tokenize, chunk_args)
+
+    results = pool_pretokenize(num_proc, chunk_args)
 
     pre_tokens = Counter()
     for res in results:
@@ -159,3 +192,49 @@ def train_bpe_main(input_path: str, vocab_size: int, special_tokens: list[str]):
     vocab, merges = trainer.train(pre_tokens)
 
     return vocab, merges
+
+import base64
+import json
+def b64_encode(b: bytes) -> str:
+    return base64.b64encode(b).decode('ascii')
+
+def b64_decode(s: str) -> bytes:
+    return base64.b64decode(s.encode('ascii'))
+
+@measure
+def save_tokenizer(vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], path: str):
+    json_vocab = {k: b64_encode(v) for k, v in vocab.items()}
+    json_merges = [tuple([b64_encode(x), b64_encode(y)]) for x, y in merges]
+
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump({'vocab': json_vocab, 'merges': json_merges}, f, ensure_ascii=False, indent=2)
+
+@measure
+def load_tokenizer(path: str) -> (dict[int, bytes], list[tuple[bytes, bytes]]):
+    with open(path, 'r', encoding='utf-8') as f:
+        obj = json.load(f)
+
+    json_vocab = obj['vocab']
+    json_merges = obj['merges']
+
+    vocab = {int(k): b64_decode(v) for k, v in json_vocab.items()}
+    merges = [(b64_decode(x), b64_decode(y)) for x, y in json_merges]
+
+    return vocab, merges
+
+if __name__ == '__main__':
+    # vocab, merges = train_bpe_main('/home/yangmingxuan/standford-cs336/data/TinyStoriesV2-GPT4-train.txt', 1000, '<|endoftext|>')
+    # save_tokenizer(vocab, merges, '/home/yangmingxuan/standford-cs336/data/TinyStoriesV2-GPT4-train-tokenizer.json')
+    load_vocab, load_merges = load_tokenizer('/home/yangmingxuan/standford-cs336/data/TinyStoriesV2-GPT4-train-tokenizer.json')
+    lg_byte = b''
+    for v in load_vocab.values():
+        if len(lg_byte) < len(v):
+            lg_byte = v
+    
+    lg_bytes = []
+    for v in load_vocab.values():
+        if len(lg_byte) == len(v):
+            lg_bytes.append(v)
+
+    logger.info(f"longest byte: {lg_bytes}")
+

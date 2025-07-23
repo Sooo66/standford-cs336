@@ -18,4 +18,8 @@ Knowledge
 (a) ~970s, ~460000KB; longest byte: [b' surpris', b' happily', b' quickly', b' magical', b' backyar']
 (b) most cost part: pre_tokenize.
 
-
+## Q: Experiments with tokenizers
+(a) ts compression ration: 1.47 bytes/token; owt compression ration: 1.51 bytes/token.
+(b) compression ration of tokenizing owt docs by ts tokenizer: 1.34 bytes/token.
+(c) owt tokenization throughput: 668604.92 bytes/second. 892 * 1024**3 / 668604.92 = 1432501.73 seconds = 397.92 hours.
+(d) vocab size if smaller than np.uint16 MAX_VALUE.

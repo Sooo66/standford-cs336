@@ -9,7 +9,7 @@ import numpy.typing as npt
 import torch
 from torch import Tensor
 
-
+from cs336_basics.module import Linear
 
 def run_linear(
     d_in: int,
@@ -29,10 +29,18 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
+    layer = Linear(d_in, d_out)
+    layer.load_state_dict(
+        {
+            "weights": weights,
+        }
+    )
 
+    return layer.forward(in_features)
     raise NotImplementedError
 
 
+from cs336_basics.module import Embedding
 def run_embedding(
     vocab_size: int,
     d_model: int,
@@ -51,10 +59,15 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
+    layer = Embedding(num_embeddings=vocab_size, embedding_dim=d_model)
+    layer.load_state_dict(
+        {"weights": weights,}
+    )
 
+    return layer.forward(token_ids)
     raise NotImplementedError
 
-
+from cs336_basics.module import SwiGLU
 def run_swiglu(
     d_model: int,
     d_ff: int,
@@ -84,9 +97,16 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = SwiGLU(d_model=d_model, d_ff=d_ff)
+    swiglu.load_state_dict({
+        "w1_weight.weights": w1_weight,
+        "w2_weight.weights": w2_weight, 
+        "w3_weight.weights": w3_weight
+    })
 
+    return swiglu.forward(in_features)
 
+from cs336_basics.module import scaled_dot_product_attention
 def run_scaled_dot_product_attention(
     Q: Float[Tensor, " ... queries d_k"],
     K: Float[Tensor, " ... keys d_k"],
@@ -105,6 +125,7 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
+    return scaled_dot_product_attention(Q, K, V, mask)
     raise NotImplementedError
 
 
@@ -182,6 +203,7 @@ def run_multihead_self_attention_with_rope(
     raise NotImplementedError
 
 
+from cs336_basics.module import RoPE
 def run_rope(
     d_k: int,
     theta: float,
@@ -201,6 +223,8 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
+    rope = RoPE(theta, d_k, max_seq_len)
+    return rope.forward(in_query_or_key, token_positions)
     raise NotImplementedError
 
 
@@ -359,6 +383,7 @@ def run_transformer_lm(
     raise NotImplementedError
 
 
+from cs336_basics.module import RMSNorm
 def run_rmsnorm(
     d_model: int,
     eps: float,
@@ -379,6 +404,11 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
+    layer = RMSNorm(d_model=d_model, eps=eps)
+    layer.load_state_dict(
+        {"gain_weights": weights}
+    )
+    return layer.forward(in_features)
     raise NotImplementedError
 
 
@@ -419,6 +449,7 @@ def run_get_batch(
     raise NotImplementedError
 
 
+from cs336_basics.module import softmax
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
     """
     Given a tensor of inputs, return the output of softmaxing the given `dim`
@@ -432,6 +463,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
+    return softmax(in_features, dim)
     raise NotImplementedError
 
 
@@ -537,7 +569,7 @@ def run_load_checkpoint(
     """
     raise NotImplementedError
 
-
+from cs336_basics import tokenizer
 def get_tokenizer(
     vocab: dict[int, bytes],
     merges: list[tuple[bytes, bytes]],
@@ -558,10 +590,11 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
+    return tokenizer.tokenizer(vocab, merges, special_tokens)
     raise NotImplementedError
 
 
-from cs336_basics import bpe_tokenizer
+from cs336_basics import bpe_tokenizer_trainer
 def run_train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
@@ -589,5 +622,5 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    return bpe_tokenizer.train_bpe_main(input_path, vocab_size, special_tokens)
+    return bpe_tokenizer_trainer.train_bpe_main(input_path, vocab_size, special_tokens)
     raise NotImplementedError

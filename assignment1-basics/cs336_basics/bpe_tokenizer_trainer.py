@@ -1,4 +1,4 @@
-from pretokenization_example import find_chunk_boundaries
+from cs336_basics.pretokenization_example import find_chunk_boundaries
 from multiprocessing import Pool, cpu_count
 import regex as re
 from collections import Counter, defaultdict
@@ -182,15 +182,20 @@ def train_bpe_main(input_path: str, vocab_size: int, special_tokens: list[str]):
     # with Pool(num_proc) as pool:
     #     results = pool.starmap(pre_tokenize, chunk_args)
 
+    logger.info("🚀 开始并行预分词...")
     results = pool_pretokenize(num_proc, chunk_args)
+    logger.info("✅ 预分词完成。")
 
+    logger.info("📊 合并预分词结果...")
     pre_tokens = Counter()
     for res in results:
         pre_tokens.update(res)
+    logger.info(f"✅ 合并完成，共 {len(pre_tokens)} 种不同的初始 token。")
 
+    logger.info("🧠 开始 BPE 训练...")
     trainer = BPETrainer(vocab_size, special_tokens)
     vocab, merges = trainer.train(pre_tokens)
-
+    logger.info("✅ BPE 训练完成。")
     return vocab, merges
 
 import base64
@@ -223,16 +228,16 @@ def load_tokenizer(path: str) -> (dict[int, bytes], list[tuple[bytes, bytes]]):
     return vocab, merges
 
 if __name__ == '__main__':
-    # vocab, merges = train_bpe_main('/home/yangmingxuan/standford-cs336/data/TinyStoriesV2-GPT4-train.txt', 1000, '<|endoftext|>')
-    # save_tokenizer(vocab, merges, '/home/yangmingxuan/standford-cs336/data/TinyStoriesV2-GPT4-train-tokenizer.json')
-    load_vocab, load_merges = load_tokenizer('/home/yangmingxuan/standford-cs336/data/TinyStoriesV2-GPT4-train-tokenizer.json')
+    vocab, merges = train_bpe_main('/home/yangmingxuan/standford-cs336/data/owt_train.txt', 32000, '<|endoftext|>')
+    save_tokenizer(vocab, merges, '/home/yangmingxuan/standford-cs336/data/owt_train_tokenizer.json')
+    # load_vocab, load_merges = load_tokenizer('/home/yangmingxuan/standford-cs336/data/TinyStoriesV2-GPT4-train-tokenizer.json')
     lg_byte = b''
-    for v in load_vocab.values():
+    for v in vocab.values():
         if len(lg_byte) < len(v):
             lg_byte = v
     
     lg_bytes = []
-    for v in load_vocab.values():
+    for v in vocab.values():
         if len(lg_byte) == len(v):
             lg_bytes.append(v)
 

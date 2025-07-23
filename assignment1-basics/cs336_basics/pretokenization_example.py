@@ -60,3 +60,15 @@ def find_chunk_boundaries(
 #         f.seek(start)
 #         chunk = f.read(end - start).decode("utf-8", errors="ignore")
 #         # Run pre-tokenization on your chunk and store the counts for each pre-token
+
+
+def get_char_len(input_file: str) -> int:
+    length = 0
+    chunk_size = 10240
+    with open(input_file, 'r') as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            length += len(chunk)
+        return length

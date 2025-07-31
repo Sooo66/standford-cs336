@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 from einops import rearrange, einsum, reduce, repeat
+import einx
+from jaxtyping import Float, Int
+from torch import Tensor
 
 class Linear(nn.Module):
     def __init__(self, in_features, out_features, device: torch.device | None=None, dtype: torch.dtype | None=None):
@@ -21,8 +24,8 @@ class Linear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         o = einsum(
-            self.weights, x,
-            "d_out d_in, ... d_in -> ... d_out"
+            x, self.weights,
+            "... d_in, d_out d_in -> ... d_out"
         )
 
         return o
@@ -62,20 +65,20 @@ class RMSNorm(nn.Module):
         x = x.to(torch.float32)
         
         rms = (reduce(x.square(), "... d -> ... 1", "mean") + self.eps).sqrt()
-        x /= rms
-        o = einsum(x, self.gain_weights, "... d, d -> ... d")
+        x = x / rms
+        o = x * self.gain_weights
 
         return o.to(in_dtype)
-    
-class SwiGLU(nn.Module):
+
+class SwiGLU_FFN(nn.Module):
     def __init__(self, d_model: int, d_ff: int, device: torch.device | None=None, dtype: torch.dtype | None=None):
         super().__init__()
         self.d_model = d_model
         self.d_ff = d_ff
 
-        self.w1_weight = Linear(in_features=d_model, out_features=d_ff)
-        self.w2_weight = Linear(in_features=d_ff, out_features=d_model)
-        self.w3_weight = Linear(in_features=d_model, out_features=d_ff)
+        self.w1_weight = Linear(in_features=d_model, out_features=d_ff, device=device, dtype=dtype)
+        self.w2_weight = Linear(in_features=d_ff, out_features=d_model, device=device, dtype=dtype)
+        self.w3_weight = Linear(in_features=d_model, out_features=d_ff, device=device, dtype=dtype)
 
         self.SiLU = lambda x: x * torch.sigmoid(x)
 
@@ -133,7 +136,7 @@ class RoPE(nn.Module):
 import math
 def softmax(x: torch.Tensor, dim: int=-1):
     x -= x.max(dim, keepdim=True).values
-    x = math.e ** x
+    x = torch.exp(x)
     o = x / x.sum(dim, keepdim=True)
 
     return o
@@ -148,8 +151,8 @@ def scaled_dot_product_attention(
     V: Float[Tensor, " ... values d_v"],
     mask: Float[Tensor, " ... queries keys"] | None = None,
 ) -> Float[Tensor, " ... queries d_v"]:
-    logger.debug(f"Q shape: {Q.shape}")
-    logger.debug(f"V shape: {V.shape}")
+    # logger.debug(f"Q shape: {Q.shape}")
+    # logger.debug(f"V shape: {V.shape}")
     attn = einsum(Q, K.transpose(dim0=-2, dim1=-1), "... queries d_k, ... d_k keys -> ... queries keys")
     attn = attn / (Q.shape[-1] ** 0.5)
     if mask is None:
@@ -162,11 +165,62 @@ def scaled_dot_product_attention(
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int):
+    def __init__(self, d_model: int, num_heads: int, max_seq_len: int | None=None, theta: float | None=None):
         super().__init__()
         self.d_model = d_model
         self.num_heads = num_heads
+        self.d_k = d_model // num_heads
+        self.d_v = self.d_k
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+
+        self.q_proj = Linear(d_model, num_heads * self.d_k)
+        self.k_proj = Linear(d_model, num_heads * self.d_k)
+        self.v_proj = Linear(d_model, num_heads * self.d_v)
+        self.o_proj = Linear(num_heads * self.d_v, d_model)
+
+        if theta is not None:
+            self.pos_encoder = RoPE(theta, self.d_k, max_seq_len)
+
+    def forward(self, x: Float[Tensor, "seq_len d_model"], token_positions: Int[Tensor, " ... seq_len"] | None = None,) -> Float[Tensor, "seq_len d_model"]:
+        *b, seq_len, d_model = x.size()
+        Q = self.q_proj(x)
+        K = self.k_proj(x)
+        V = self.v_proj(x)
+
+        Q, K, V = (
+            rearrange(X, "... seq (heads d_k) -> ... heads seq d_k", heads=self.num_heads)
+            for X in (Q, K, V)
+        )
+
+        if token_positions is None:
+            token_positions = einx.rearrange(
+                'seq -> b... seq',
+                torch.arange(seq_len, device=x.device),
+                b = [1] * len(b)
+            )
+
+        token_positions = rearrange(token_positions, "... seq -> ... 1 seq")
+
+        if self.theta is not None:
+            Q = self.pos_encoder.forward(Q, token_positions)
+            K = self.pos_encoder.forward(K, token_positions)
+
+        o = scaled_dot_product_attention(Q, K, V) # [... head seq d_k]
+        o = rearrange(o, "... heads seq d_k -> ... seq (heads d_k)").contiguous()
+        o = self.o_proj(o)
+
+        return o
     
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, max_seq_len: int, theta: float):
+        super().__init__()
+        self.ln1 = RMSNorm(d_model=d_model)
+        self.attn = MultiHeadAttention(d_model=d_model, num_heads=num_heads, max_seq_len=max_seq_len, theta=theta)
+        self.ln2 = RMSNorm(d_model=d_model)
+        self.ffn = SwiGLU_FFN(d_model=d_model, d_ff=d_ff)
+
     def forward(self, x):
-        
-        pass
+        x = x + self.attn(self.ln1(x))
+        x = x + self.ffn(self.ln2(x))
+        return x

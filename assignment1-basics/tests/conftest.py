@@ -109,8 +109,11 @@ class Snapshot:
 
 
         # Load the snapshot
-        with open(snapshot_path, "rb") as f:
-            expected_data = pickle.load(f)
+        if snapshot_path.suffix in [".pkl", ".pickle"]:
+            with open(snapshot_path, "rb") as f:
+                expected_data = pickle.load(f)
+        else:
+            expected_data = np.load(snapshot_path, allow_pickle=True)
         
         if isinstance(actual, dict):
             for key in actual: 
